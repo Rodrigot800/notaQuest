@@ -1,0 +1,13 @@
+--- components/study-dashboard.tsx
++++ components/study-dashboard.tsx
+@@ -94,9 +98,9 @@
+ const emptyData: DashboardData = {
+   contests: [],
+   disciplines: [],
+   topics: [],
+   sessions: [],
+ };
+ 
+-const colors = ["#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#f43f5e", "#3b82f6"];
++const colors = ["#0aa6b5", "#2563eb", "#14b8a6", "#6366f1", "#0891b2", "#64748b"];
+ 
