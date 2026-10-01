@@ -12,11 +12,22 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
-  NotebookPen,
+  Pencil,
   Plus,
   Sparkles,
   Target,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -62,6 +73,7 @@ type Topic = {
 type StudySession = {
   id: string;
   disciplineId: string;
+  topicId: string | null;
   questions: number;
   correct: number;
   sessionDate: string;
@@ -107,9 +119,12 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
   const [error, setError] = useState("");
   const [activeContestId, setActiveContestId] = useState("");
   const [tab, setTab] = useState("visao");
-  const [dialog, setDialog] = useState<"contest" | "discipline" | "topic" | "session" | "notes" | null>(null);
+  const [dialog, setDialog] = useState<"contest" | "discipline" | "topic" | "session" | null>(null);
+  const [selectedDiscipline, setSelectedDiscipline] = useState<Discipline | null>(null);
   const [selectedDisciplineId, setSelectedDisciplineId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
+  const [selectedSession, setSelectedSession] = useState<StudySession | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "topic" | "session"; id: string; label: string } | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
@@ -175,6 +190,23 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
     }
   }
 
+  async function removeItem() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    setError("");
+    try {
+      const path = deleteTarget.type === "topic" ? `/api/topics/${deleteTarget.id}` : `/api/sessions/${deleteTarget.id}`;
+      const response = await fetch(path, { method: "DELETE" });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Não foi possível excluir.");
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível excluir.");
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  }
+
   async function toggleTopic(topic: Topic) {
     const completed = !Boolean(topic.completed);
     setData((current) => ({
@@ -199,7 +231,27 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
 
   function openTopicDialog(disciplineId: string) {
     setSelectedDisciplineId(disciplineId);
+    setSelectedTopic(null);
     setDialog("topic");
+  }
+
+  function openDisciplineDialog(discipline: Discipline | null = null) {
+    setSelectedDiscipline(discipline);
+    setDialog("discipline");
+  }
+
+  function openSessionDialog(topic: Topic | null = null) {
+    setSelectedSession(null);
+    setSelectedTopic(topic);
+    setSelectedDisciplineId(topic?.disciplineId ?? "");
+    setDialog("session");
+  }
+
+  function editSession(session: StudySession) {
+    setSelectedSession(session);
+    setSelectedTopic(data.topics.find((topic) => topic.id === session.topicId) ?? null);
+    setSelectedDisciplineId(session.disciplineId);
+    setDialog("session");
   }
 
   useEffect(() => {
@@ -253,6 +305,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
         type: "object",
         properties: {
           disciplineId: { type: "string", description: "ID da disciplina." },
+          topicId: { type: "string", description: "ID opcional do subtópico estudado." },
           questions: { type: "integer", minimum: 1, description: "Quantidade de questões feitas." },
           correct: { type: "integer", minimum: 0, description: "Quantidade de acertos." },
           sessionDate: { type: "string", description: "Data no formato AAAA-MM-DD." },
@@ -349,7 +402,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
             <Button
               className="h-11 rounded-xl bg-[#0a9ba9] px-5 font-semibold text-white shadow-[0_8px_22px_rgba(10,155,169,0.24)] hover:-translate-y-0.5 hover:bg-[#078b98] hover:shadow-[0_10px_26px_rgba(10,155,169,0.3)]"
               disabled={!disciplines.length}
-              onClick={() => setDialog("session")}
+              onClick={() => openSessionDialog()}
             >
               <Plus /> Registrar questões
             </Button>
@@ -374,9 +427,17 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
               </NativeSelect>
             </div>
             {activeContest && (
-              <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-1 px-2 text-sm text-muted-foreground">
-                <span>Banca <strong className="font-semibold text-foreground">{activeContest.board}</strong></span>
-                {activeContest.examDate && <span className="flex items-center gap-1.5"><CalendarDays className="size-4 text-cyan-600" /> Prova em {formatDate(activeContest.examDate)}</span>}
+              <div className="flex w-full min-w-0 flex-col gap-2 text-sm sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
+                <span className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/55 px-3 py-2">
+                  <span className="shrink-0 text-muted-foreground">Banca</span>
+                  <strong className="min-w-0 truncate font-semibold text-foreground" title={activeContest.board}>{activeContest.board}</strong>
+                </span>
+                {activeContest.examDate && (
+                  <span className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/55 px-3 py-2 text-muted-foreground">
+                    <span className="flex items-center gap-1.5 whitespace-nowrap"><CalendarDays className="size-4 shrink-0 text-cyan-600" /> Prova em {formatDate(activeContest.examDate)}</span>
+                    <strong className="whitespace-nowrap rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300">{examCountdown(activeContest.examDate)}</strong>
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -501,7 +562,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                     <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Conteúdo do edital</h2>
                     <p className="mt-1 text-sm text-muted-foreground">Marque cada tópico concluído e guarde suas anotações.</p>
                   </div>
-                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" onClick={() => setDialog("discipline")}><Plus /> Nova disciplina</Button>
+                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" onClick={() => openDisciplineDialog()}><Plus /> Novo tópico</Button>
                 </div>
                 {disciplines.map((discipline, index) => {
                   const ownTopics = topics.filter((topic) => topic.disciplineId === discipline.id);
@@ -509,35 +570,47 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                   const percentage = ownTopics.length ? Math.round((done / ownTopics.length) * 100) : 0;
                   return (
                     <article key={discipline.id} className="overflow-hidden rounded-[1.5rem] border bg-card shadow-[0_14px_40px_rgba(15,36,58,0.07)]">
-                      <header className="flex flex-wrap items-center gap-4 border-b bg-muted/45 p-5 sm:p-6">
-                        <span className="h-10 w-1.5 rounded-full" style={{ background: colors[index % colors.length] }} />
-                        <div className="min-w-0 flex-1">
-                          <h3 className="font-semibold">{discipline.name}</h3>
-                          <p className="text-sm text-muted-foreground">{done} de {ownTopics.length} tópicos concluídos</p>
+                      <header className="border-b bg-muted/45 p-5 sm:p-6">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 h-10 w-1.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
+                          <div className="min-w-0 flex-1">
+                            <h3 className="break-words font-semibold leading-6">{discipline.name}</h3>
+                            <p className="text-sm text-muted-foreground">{done} de {ownTopics.length} subtópicos concluídos</p>
+                          </div>
+                          <Button variant="ghost" size="sm" className="shrink-0 rounded-xl" onClick={() => openDisciplineDialog(discipline)} aria-label={`Editar tópico ${discipline.name}`}><Pencil /> <span className="hidden sm:inline">Editar tópico</span></Button>
                         </div>
-                        <div className="flex w-32 items-center gap-3">
-                          <Progress value={percentage} className="bg-muted [&_[data-slot=progress-indicator]]:bg-cyan-500" />
-                          <span className="text-sm font-semibold">{percentage}%</span>
+                        <div className="mt-4 flex flex-wrap items-center gap-3 pl-4.5">
+                          <div className="flex min-w-36 flex-1 items-center gap-3">
+                            <Progress value={percentage} className="bg-muted [&_[data-slot=progress-indicator]]:bg-cyan-500" />
+                            <span className="w-10 text-right text-sm font-semibold">{percentage}%</span>
+                          </div>
+                          <Button variant="outline" size="sm" className="rounded-xl bg-card shadow-sm" onClick={() => openTopicDialog(discipline.id)}><Plus /> Subtópico</Button>
                         </div>
-                        <Button variant="outline" size="sm" className="rounded-xl bg-card shadow-sm" onClick={() => openTopicDialog(discipline.id)}><Plus /> Tópico</Button>
                       </header>
                       {ownTopics.length ? (
                         <div className="divide-y">
-                          {ownTopics.map((topic) => (
-                            <div key={topic.id} className="flex items-start gap-3 px-5 py-4 hover:bg-muted/35 sm:px-6">
-                              <Checkbox checked={Boolean(topic.completed)} onCheckedChange={() => toggleTopic(topic)} aria-label={`Marcar ${topic.title} como concluído`} className="mt-1 size-5" />
-                              <button
-                                className="min-w-0 flex-1 text-left"
-                                onClick={() => { setSelectedTopic(topic); setDialog("notes"); }}
-                              >
-                                <p className={`font-medium ${topic.completed ? "text-muted-foreground line-through" : ""}`}>{topic.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{topic.notes || "Sem anotações. Clique para adicionar."}</p>
-                              </button>
-                              <Button variant="ghost" size="icon-sm" onClick={() => { setSelectedTopic(topic); setDialog("notes"); }} aria-label={`Editar anotações de ${topic.title}`}>
-                                <NotebookPen />
-                              </Button>
-                            </div>
-                          ))}
+                          {ownTopics.map((topic) => {
+                            const topicSessions = sessions.filter((session) => session.topicId === topic.id);
+                            const topicQuestions = topicSessions.reduce((sum, session) => sum + Number(session.questions), 0);
+                            return (
+                              <div key={topic.id} className="flex items-start gap-3 px-5 py-4 hover:bg-muted/35 sm:px-6">
+                                <Checkbox checked={Boolean(topic.completed)} onCheckedChange={() => toggleTopic(topic)} aria-label={`Marcar ${topic.title} como concluído`} className="mt-1 size-5" />
+                                <button
+                                  className="min-w-0 flex-1 text-left"
+                                  onClick={() => { setSelectedTopic(topic); setDialog("topic"); }}
+                                >
+                                  <p className={`font-medium ${topic.completed ? "text-muted-foreground line-through" : ""}`}>{topic.title}</p>
+                                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{topic.notes || "Sem anotações. Clique para editar."}</p>
+                                  <p className="mt-2 text-xs font-medium text-cyan-700 dark:text-cyan-300">{topicQuestions ? `${topicQuestions} questões em ${topicSessions.length} sessões` : "Nenhuma questão vinculada"}</p>
+                                </button>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <Button variant="ghost" size="icon-sm" onClick={() => openSessionDialog(topic)} aria-label={`Adicionar questões a ${topic.title}`}><Plus /></Button>
+                                  <Button variant="ghost" size="icon-sm" onClick={() => { setSelectedTopic(topic); setDialog("topic"); }} aria-label={`Editar ${topic.title}`}><Pencil /></Button>
+                                  <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => setDeleteTarget({ type: "topic", id: topic.id, label: topic.title })} aria-label={`Excluir ${topic.title}`}><Trash2 /></Button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <SmallEmpty text="Esta disciplina ainda não tem tópicos." />
@@ -545,7 +618,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                     </article>
                   );
                 })}
-                {!disciplines.length && <EmptyState icon={<FileText />} title="Adicione uma disciplina" text="Crie livremente as disciplinas do seu edital." action="Nova disciplina" onAction={() => setDialog("discipline")} />}
+                {!disciplines.length && <EmptyState icon={<FileText />} title="Adicione um tópico" text="Crie as áreas principais do seu edital e organize seus subtópicos." action="Novo tópico" onAction={() => openDisciplineDialog()} />}
               </section>
             )}
           </TabsContent>
@@ -560,7 +633,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                     <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Seu desempenho</h2>
                     <p className="mt-1 text-sm text-muted-foreground">Resultados das questões feitas fora do sistema.</p>
                   </div>
-                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" disabled={!disciplines.length} onClick={() => setDialog("session")}><Plus /> Registrar sessão</Button>
+                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" disabled={!disciplines.length} onClick={() => openSessionDialog()}><Plus /> Registrar sessão</Button>
                 </div>
                 <div className="mt-5 grid gap-5 xl:grid-cols-2">
                   <ChartCard title="Evolução dos acertos" empty={!evolution.length}>
@@ -594,8 +667,10 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                         <TableRow>
                           <TableHead>Data</TableHead>
                           <TableHead>Disciplina</TableHead>
+                          <TableHead>Subtópico</TableHead>
                           <TableHead>Resultado</TableHead>
                           <TableHead className="text-right">Aproveitamento</TableHead>
+                          <TableHead className="w-24 text-right">Ações</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -603,8 +678,15 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                           <TableRow key={session.id}>
                             <TableCell>{formatDate(session.sessionDate)}</TableCell>
                             <TableCell>{disciplines.find((item) => item.id === session.disciplineId)?.name}</TableCell>
+                            <TableCell>{topics.find((item) => item.id === session.topicId)?.title ?? "—"}</TableCell>
                             <TableCell>{session.correct} de {session.questions}</TableCell>
                             <TableCell className="text-right font-semibold">{Math.round((Number(session.correct) / Number(session.questions)) * 100)}%</TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-1">
+                                <Button variant="ghost" size="icon-sm" onClick={() => editSession(session)} aria-label="Editar registro de questões"><Pencil /></Button>
+                                <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => setDeleteTarget({ type: "session", id: session.id, label: `${session.questions} questões de ${formatDate(session.sessionDate)}` })} aria-label="Excluir registro de questões"><Trash2 /></Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -620,10 +702,26 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
       </section>
 
       <ContestDialog open={dialog === "contest"} busy={busy} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => mutate("/api/contests", body)} />
-      <DisciplineDialog open={dialog === "discipline"} busy={busy} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(name) => mutate("/api/disciplines", { contestId: activeContestId, name })} />
-      <TopicDialog open={dialog === "topic"} busy={busy} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => mutate("/api/topics", { disciplineId: selectedDisciplineId, ...body })} />
-      <SessionDialog open={dialog === "session"} busy={busy} disciplines={disciplines} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => mutate("/api/sessions", body)} />
-      <NotesDialog open={dialog === "notes"} busy={busy} topic={selectedTopic} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(notes) => selectedTopic && mutate(`/api/topics/${selectedTopic.id}`, { notes }, "PATCH")} />
+      <DisciplineDialog open={dialog === "discipline"} busy={busy} discipline={selectedDiscipline} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(name) => selectedDiscipline ? mutate(`/api/disciplines/${selectedDiscipline.id}`, { name }, "PATCH") : mutate("/api/disciplines", { contestId: activeContestId, name })} />
+      <TopicDialog open={dialog === "topic"} busy={busy} topic={selectedTopic} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => selectedTopic ? mutate(`/api/topics/${selectedTopic.id}`, body, "PATCH") : mutate("/api/topics", { disciplineId: selectedDisciplineId, ...body })} />
+      <SessionDialog open={dialog === "session"} busy={busy} disciplines={disciplines} topics={topics} topic={selectedTopic} session={selectedSession} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => selectedSession ? mutate(`/api/sessions/${selectedSession.id}`, body, "PATCH") : mutate("/api/sessions", body)} />
+
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="rounded-[1.5rem]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{deleteTarget?.type === "topic" ? "Excluir subtópico?" : "Excluir registro de questões?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === "topic"
+                ? `“${deleteTarget.label}” será removido. As sessões de questões já registradas serão preservadas, mas ficarão sem subtópico.`
+                : `“${deleteTarget?.label}” será removido permanentemente das métricas.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void removeItem()}>{busy ? "Excluindo…" : "Excluir"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }
@@ -735,74 +833,77 @@ function ContestDialog({ open, onOpenChange, onSubmit, busy }: { open: boolean; 
   );
 }
 
-function DisciplineDialog({ open, onOpenChange, onSubmit, busy }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (name: string) => void; busy: boolean }) {
+function DisciplineDialog({ open, onOpenChange, onSubmit, busy, discipline }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (name: string) => void; busy: boolean; discipline: Discipline | null }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSubmit(String(new FormData(event.currentTarget).get("name") ?? ""));
   }
   return (
-    <DialogShell open={open} onOpenChange={onOpenChange} title="Nova disciplina" description="Crie livremente uma área do edital." busy={busy}>
-      <form onSubmit={submit} className="space-y-4">
-        <Field label="Nome da disciplina" name="name" placeholder="Ex.: Engenharia de Software" required />
-        <DialogFooter><Button type="submit" className="rounded-xl">Adicionar disciplina</Button></DialogFooter>
+    <DialogShell open={open} onOpenChange={onOpenChange} title={discipline ? "Editar tópico" : "Novo tópico"} description={discipline ? "Atualize o nome deste tópico principal." : "Crie uma área principal do edital para organizar seus subtópicos."} busy={busy}>
+      <form key={discipline?.id ?? "new-discipline"} onSubmit={submit} className="space-y-4">
+        <Field label="Nome do tópico" name="name" defaultValue={discipline?.name ?? ""} placeholder="Ex.: Engenharia de Software" required />
+        <DialogFooter><Button type="submit" className="rounded-xl">{discipline ? "Salvar alterações" : "Adicionar tópico"}</Button></DialogFooter>
       </form>
     </DialogShell>
   );
 }
 
-function TopicDialog({ open, onOpenChange, onSubmit, busy }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (body: Record<string, unknown>) => void; busy: boolean }) {
+function TopicDialog({ open, onOpenChange, onSubmit, busy, topic }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (body: Record<string, unknown>) => void; busy: boolean; topic: Topic | null }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSubmit(Object.fromEntries(new FormData(event.currentTarget).entries()));
   }
   return (
-    <DialogShell open={open} onOpenChange={onOpenChange} title="Novo tópico" description="Adicione um item do conteúdo e, se quiser, suas primeiras anotações." busy={busy}>
-      <form onSubmit={submit} className="space-y-4">
-        <Field label="Tópico ou subtópico" name="title" placeholder="Ex.: Modelos de desenvolvimento de software" required />
-        <div className="space-y-2"><Label htmlFor="topic-notes">Anotações</Label><Textarea id="topic-notes" name="notes" className="min-h-32" placeholder="Escreva sua explicação, resumo ou pontos importantes…" /></div>
-        <DialogFooter><Button type="submit" className="rounded-xl">Adicionar tópico</Button></DialogFooter>
+    <DialogShell open={open} onOpenChange={onOpenChange} title={topic ? "Editar subtópico" : "Novo subtópico"} description={topic ? "Atualize o nome e as anotações deste item." : "Adicione um item do conteúdo e, se quiser, suas primeiras anotações."} busy={busy}>
+      <form key={topic?.id ?? "new-topic"} onSubmit={submit} className="space-y-4">
+        <Field label="Tópico ou subtópico" name="title" defaultValue={topic?.title ?? ""} placeholder="Ex.: Modelos de desenvolvimento de software" required />
+        <div className="space-y-2"><Label htmlFor="topic-notes">Anotações</Label><Textarea id="topic-notes" name="notes" defaultValue={topic?.notes ?? ""} className="min-h-32" placeholder="Escreva sua explicação, resumo ou pontos importantes…" /></div>
+        <DialogFooter><Button type="submit" className="rounded-xl">{topic ? "Salvar alterações" : "Adicionar subtópico"}</Button></DialogFooter>
       </form>
     </DialogShell>
   );
 }
 
-function SessionDialog({ open, onOpenChange, onSubmit, busy, disciplines }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (body: Record<string, unknown>) => void; busy: boolean; disciplines: Discipline[] }) {
+function SessionDialog({ open, onOpenChange, onSubmit, busy, disciplines, topics, topic, session }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (body: Record<string, unknown>) => void; busy: boolean; disciplines: Discipline[]; topics: Topic[]; topic: Topic | null; session: StudySession | null }) {
+  const [disciplineId, setDisciplineId] = useState("");
+  const [topicId, setTopicId] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setDisciplineId(session?.disciplineId ?? topic?.disciplineId ?? "");
+    setTopicId(session?.topicId ?? topic?.id ?? "");
+  }, [open, session, topic]);
+
+  const availableTopics = topics.filter((item) => item.disciplineId === disciplineId);
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     onSubmit(Object.fromEntries(new FormData(event.currentTarget).entries()));
   }
   return (
-    <DialogShell open={open} onOpenChange={onOpenChange} title="Registrar questões" description="Informe o resultado de uma sessão feita fora do sistema." busy={busy}>
-      <form onSubmit={submit} className="space-y-4">
+    <DialogShell open={open} onOpenChange={onOpenChange} title={session ? "Editar questões" : "Registrar questões"} description="Vincule o resultado à disciplina e, quando desejar, a um subtópico específico." busy={busy}>
+      <form key={session?.id ?? topic?.id ?? "new-session"} onSubmit={submit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="session-discipline">Disciplina</Label>
-          <NativeSelect id="session-discipline" name="disciplineId" className="w-full" required>
+          <NativeSelect id="session-discipline" name="disciplineId" className="w-full" value={disciplineId} onChange={(event) => { setDisciplineId(event.target.value); setTopicId(""); }} required>
             <NativeSelectOption value="">Selecione</NativeSelectOption>
             {disciplines.map((discipline) => <NativeSelectOption key={discipline.id} value={discipline.id}>{discipline.name}</NativeSelectOption>)}
           </NativeSelect>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Questões feitas" name="questions" type="number" min="1" required />
-          <Field label="Acertos" name="correct" type="number" min="0" required />
+        <div className="space-y-2">
+          <Label htmlFor="session-topic">Subtópico (opcional)</Label>
+          <NativeSelect id="session-topic" name="topicId" className="w-full" value={topicId} onChange={(event) => setTopicId(event.target.value)} disabled={!disciplineId}>
+            <NativeSelectOption value="">Sem subtópico</NativeSelectOption>
+            {availableTopics.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.title}</NativeSelectOption>)}
+          </NativeSelect>
         </div>
-        <Field label="Data" name="sessionDate" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
-        <div className="space-y-2"><Label htmlFor="session-notes">Observação (opcional)</Label><Textarea id="session-notes" name="notes" placeholder="Ex.: Simulado da banca FCC" /></div>
-        <DialogFooter><Button type="submit" className="rounded-xl">Salvar resultado</Button></DialogFooter>
-      </form>
-    </DialogShell>
-  );
-}
-
-function NotesDialog({ open, onOpenChange, onSubmit, busy, topic }: { open: boolean; onOpenChange: (open: boolean) => void; onSubmit: (notes: string) => void; busy: boolean; topic: Topic | null }) {
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    onSubmit(String(new FormData(event.currentTarget).get("notes") ?? ""));
-  }
-  return (
-    <DialogShell open={open} onOpenChange={onOpenChange} title={topic?.title ?? "Anotações"} description="Use este espaço para explicações longas, resumos e pontos de revisão." busy={busy}>
-      <form onSubmit={submit} className="space-y-4">
-        <Textarea key={topic?.id} name="notes" defaultValue={topic?.notes ?? ""} className="min-h-72 leading-6" placeholder="Digite suas anotações…" />
-        <DialogFooter><Button type="submit" className="rounded-xl">Salvar anotações</Button></DialogFooter>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Questões feitas" name="questions" type="number" min="1" defaultValue={session?.questions} required />
+          <Field label="Acertos" name="correct" type="number" min="0" defaultValue={session?.correct} required />
+        </div>
+        <Field label="Data" name="sessionDate" type="date" defaultValue={session?.sessionDate ?? new Date().toISOString().slice(0, 10)} required />
+        <div className="space-y-2"><Label htmlFor="session-notes">Observação (opcional)</Label><Textarea id="session-notes" name="notes" defaultValue={session?.notes ?? ""} placeholder="Ex.: Simulado da banca FCC" /></div>
+        <DialogFooter><Button type="submit" className="rounded-xl">{session ? "Salvar alterações" : "Salvar resultado"}</Button></DialogFooter>
       </form>
     </DialogShell>
   );
@@ -817,4 +918,17 @@ function formatDate(value: string, short = false) {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return value;
   return new Intl.DateTimeFormat("pt-BR", short ? { day: "2-digit", month: "2-digit" } : { dateStyle: "short" }).format(new Date(year, month - 1, day));
+}
+
+function examCountdown(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const exam = new Date(year, month - 1, day);
+  const days = Math.round((exam.getTime() - today.getTime()) / 86_400_000);
+  if (days < 0) return "Prova realizada";
+  if (days === 0) return "É hoje";
+  if (days === 1) return "Falta 1 dia";
+  return `Faltam ${days} dias`;
 }

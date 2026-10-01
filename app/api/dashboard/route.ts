@@ -18,7 +18,7 @@ export async function GET() {
         "SELECT id, discipline_id AS disciplineId, title, notes, completed, created_at AS createdAt, updated_at AS updatedAt FROM topics WHERE user_id = ? ORDER BY created_at ASC"
       ).bind(user.userId).all(),
       db.prepare(
-        "SELECT id, discipline_id AS disciplineId, questions, correct, session_date AS sessionDate, notes, created_at AS createdAt FROM study_sessions WHERE user_id = ? ORDER BY session_date ASC, created_at ASC LIMIT 500"
+        "SELECT id, discipline_id AS disciplineId, topic_id AS topicId, questions, correct, session_date AS sessionDate, notes, created_at AS createdAt FROM study_sessions WHERE user_id = ? ORDER BY session_date ASC, created_at ASC LIMIT 500"
       ).bind(user.userId).all(),
     ]);
 

@@ -22,3 +22,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return jsonError("Não foi possível atualizar o tópico.", 503);
   }
 }
+
+export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const user = await getApiUser();
+  if (!user) return jsonError("Não autenticado.", 401);
+  const { id } = await context.params;
+
+  try {
+    const db = getDatabase();
+    const owned = await db.prepare(
+      "SELECT id FROM topics WHERE id = ? AND user_id = ?"
+    ).bind(id, user.userId).first();
+    if (!owned) return jsonError("Subtópico não encontrado.", 404);
+
+    const [, result] = await db.batch([
+      db.prepare("UPDATE study_sessions SET topic_id = NULL WHERE topic_id = ? AND user_id = ?").bind(id, user.userId),
+      db.prepare("DELETE FROM topics WHERE id = ? AND user_id = ?").bind(id, user.userId),
+    ]);
+    if (!result.meta.changes) return jsonError("Subtópico não encontrado.", 404);
+    return Response.json({ ok: true });
+  } catch (error) {
+    console.error("topic_delete_failed", error);
+    return jsonError("Não foi possível excluir o subtópico.", 503);
+  }
+}

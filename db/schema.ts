@@ -39,6 +39,7 @@ export const topics = sqliteTable("topics", {
 export const studySessions = sqliteTable("study_sessions", {
   id: text("id").primaryKey(),
   disciplineId: text("discipline_id").notNull().references(() => disciplines.id, { onDelete: "cascade" }),
+  topicId: text("topic_id").references(() => topics.id, { onDelete: "set null" }),
   userId: text("user_id").notNull(),
   questions: integer("questions").notNull(),
   correct: integer("correct").notNull(),
@@ -47,4 +48,5 @@ export const studySessions = sqliteTable("study_sessions", {
   createdAt: integer("created_at").notNull(),
 }, (table) => [
   index("idx_sessions_user_discipline_date").on(table.userId, table.disciplineId, table.sessionDate),
+  index("idx_sessions_user_topic_date").on(table.userId, table.topicId, table.sessionDate),
 ]);
