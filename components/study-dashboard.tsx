@@ -112,6 +112,10 @@ const emptyData: DashboardData = {
 
 const colors = ["#0aa6b5", "#2563eb", "#14b8a6", "#6366f1", "#0891b2", "#64748b"];
 
+function naturalCompare(left: string, right: string) {
+  return left.localeCompare(right, "pt-BR", { numeric: true, sensitivity: "base" });
+}
+
 export function StudyDashboard({ displayName }: { displayName: string }) {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [loading, setLoading] = useState(true);
@@ -124,7 +128,8 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
   const [selectedDisciplineId, setSelectedDisciplineId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [selectedSession, setSelectedSession] = useState<StudySession | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: "topic" | "session"; id: string; label: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "discipline" | "topic" | "session"; id: string; label: string } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
@@ -145,9 +150,13 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
   }, [refresh]);
 
   const activeContest = data.contests.find((contest) => contest.id === activeContestId);
-  const disciplines = data.disciplines.filter((discipline) => discipline.contestId === activeContestId);
+  const disciplines = data.disciplines
+    .filter((discipline) => discipline.contestId === activeContestId)
+    .sort((left, right) => naturalCompare(left.name, right.name));
   const disciplineIds = useMemo(() => new Set(disciplines.map((discipline) => discipline.id)), [disciplines]);
-  const topics = data.topics.filter((topic) => disciplineIds.has(topic.disciplineId));
+  const topics = data.topics
+    .filter((topic) => disciplineIds.has(topic.disciplineId))
+    .sort((left, right) => naturalCompare(left.title, right.title));
   const sessions = data.sessions.filter((session) => disciplineIds.has(session.disciplineId));
   const totalQuestions = sessions.reduce((sum, session) => sum + Number(session.questions), 0);
   const totalCorrect = sessions.reduce((sum, session) => sum + Number(session.correct), 0);
@@ -195,8 +204,18 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
     setBusy(true);
     setError("");
     try {
-      const path = deleteTarget.type === "topic" ? `/api/topics/${deleteTarget.id}` : `/api/sessions/${deleteTarget.id}`;
-      const response = await fetch(path, { method: "DELETE" });
+      const path = deleteTarget.type === "discipline"
+        ? `/api/disciplines/${deleteTarget.id}`
+        : deleteTarget.type === "topic"
+          ? `/api/topics/${deleteTarget.id}`
+          : `/api/sessions/${deleteTarget.id}`;
+      const response = await fetch(path, {
+        method: "DELETE",
+        ...(deleteTarget.type === "discipline" ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmation: deleteConfirmation }),
+        } : {}),
+      });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Não foi possível excluir.");
       await refresh();
     } catch (reason) {
@@ -204,7 +223,13 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
     } finally {
       setBusy(false);
       setDeleteTarget(null);
+      setDeleteConfirmation("");
     }
+  }
+
+  function requestDelete(target: { type: "discipline" | "topic" | "session"; id: string; label: string }) {
+    setDeleteConfirmation("");
+    setDeleteTarget(target);
   }
 
   async function toggleTopic(topic: Topic) {
@@ -334,8 +359,51 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
       },
     });
 
+    register({
+      name: "import_syllabus_topics",
+      title: "Importar tópicos do edital",
+      description: "Cria ou atualiza uma lista numerada de tópicos em uma disciplina existente, sem duplicar itens com o mesmo número.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          disciplineName: { type: "string", description: "Nome exato da disciplina de destino." },
+          items: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Título numerado do tópico." },
+                notes: { type: "string", description: "Detalhamento ou subtópicos relacionados." },
+              },
+              required: ["title"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["disciplineName", "items"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      async execute(input) {
+        const body = input as { disciplineName?: string; items?: Array<{ title: string; notes?: string }> };
+        const discipline = data.disciplines.find((item) => naturalCompare(item.name, body.disciplineName ?? "") === 0);
+        if (!discipline) throw new Error("Disciplina não encontrada.");
+        const response = await fetch("/api/topics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ disciplineId: discipline.id, items: body.items }),
+        });
+        if (!response.ok) throw new Error((await response.json()).error || "Não foi possível importar.");
+        const result = await response.json();
+        await refresh();
+        return result;
+      },
+    });
+
     return () => lifecycle.abort();
-  }, [refresh]);
+  }, [data.disciplines, refresh]);
 
   if (loading) {
     return (
@@ -418,19 +486,28 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
         {data.contests.length > 0 && (
           <div className="mt-7 flex flex-wrap items-center gap-3 rounded-[1.35rem] border bg-card/95 p-2.5 shadow-[0_12px_35px_rgba(15,36,58,0.07)] backdrop-blur">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-50 text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300"><GraduationCap className="size-5" /></span>
-            <div className="min-w-[12rem] flex-1 sm:flex-initial">
+            <div className="min-w-0 flex-1">
               <p className="px-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Concurso ativo</p>
-              <NativeSelect className="mt-0.5 min-w-full border-0 bg-transparent p-0 text-sm font-semibold shadow-none sm:min-w-72" value={activeContestId} onChange={(event) => setActiveContestId(event.target.value)}>
-                {data.contests.map((contest) => (
-                  <NativeSelectOption key={contest.id} value={contest.id}>{contest.title} — {contest.position}</NativeSelectOption>
-                ))}
-              </NativeSelect>
+              <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                <NativeSelect
+                  wrapperClassName="w-1/2 max-w-48"
+                  className="h-9 w-full min-w-0 border-0 bg-transparent py-0 pl-3 pr-9 text-sm font-semibold shadow-none"
+                  aria-label="Concurso ativo"
+                  value={activeContestId}
+                  onChange={(event) => setActiveContestId(event.target.value)}
+                >
+                  {data.contests.map((contest) => (
+                    <NativeSelectOption key={contest.id} value={contest.id}>{contest.title}</NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                {activeContest && <span className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-muted-foreground">— {activeContest.position}</span>}
+              </div>
             </div>
             {activeContest && (
               <div className="flex w-full min-w-0 flex-col gap-2 text-sm sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
-                <span className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/55 px-3 py-2">
+                <span className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 rounded-xl bg-muted/55 px-3 py-2 sm:max-w-72">
                   <span className="shrink-0 text-muted-foreground">Banca</span>
-                  <strong className="min-w-0 truncate font-semibold text-foreground" title={activeContest.board}>{activeContest.board}</strong>
+                  <strong className="min-w-0 break-words font-semibold leading-5 text-foreground">{activeContest.board}</strong>
                 </span>
                 {activeContest.examDate && (
                   <span className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/55 px-3 py-2 text-muted-foreground">
@@ -475,7 +552,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                         <h2 className="mt-2 text-xl font-bold tracking-tight">{activeContest.title} — {activeContest.position}</h2>
                         <p className="mt-1 text-sm text-muted-foreground">Banca {activeContest.board} · {disciplines.length} disciplinas · {topics.length} tópicos</p>
                       </div>
-                      <Button variant="outline" className="rounded-xl bg-card shadow-sm" onClick={() => setDialog("discipline")}>
+                      <Button variant="outline" className="rounded-xl bg-card shadow-sm" onClick={() => openDisciplineDialog()}>
                         <Plus /> Disciplina
                       </Button>
                     </div>
@@ -562,7 +639,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                     <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">Conteúdo do edital</h2>
                     <p className="mt-1 text-sm text-muted-foreground">Marque cada tópico concluído e guarde suas anotações.</p>
                   </div>
-                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" onClick={() => openDisciplineDialog()}><Plus /> Novo tópico</Button>
+                  <Button className="rounded-xl bg-[#0a9ba9] text-white shadow-[0_8px_20px_rgba(10,155,169,0.2)] hover:bg-[#078b98]" onClick={() => openDisciplineDialog()}><Plus /> Nova disciplina</Button>
                 </div>
                 {disciplines.map((discipline, index) => {
                   const ownTopics = topics.filter((topic) => topic.disciplineId === discipline.id);
@@ -577,7 +654,10 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                             <h3 className="break-words font-semibold leading-6">{discipline.name}</h3>
                             <p className="text-sm text-muted-foreground">{done} de {ownTopics.length} subtópicos concluídos</p>
                           </div>
-                          <Button variant="ghost" size="sm" className="shrink-0 rounded-xl" onClick={() => openDisciplineDialog(discipline)} aria-label={`Editar tópico ${discipline.name}`}><Pencil /> <span className="hidden sm:inline">Editar tópico</span></Button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => openDisciplineDialog(discipline)} aria-label={`Editar disciplina ${discipline.name}`}><Pencil /> <span className="hidden sm:inline">Editar</span></Button>
+                            <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => requestDelete({ type: "discipline", id: discipline.id, label: discipline.name })} aria-label={`Excluir disciplina ${discipline.name}`}><Trash2 /></Button>
+                          </div>
                         </div>
                         <div className="mt-4 flex flex-wrap items-center gap-3 pl-4.5">
                           <div className="flex min-w-36 flex-1 items-center gap-3">
@@ -606,7 +686,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                                 <div className="flex shrink-0 items-center gap-1">
                                   <Button variant="ghost" size="icon-sm" onClick={() => openSessionDialog(topic)} aria-label={`Adicionar questões a ${topic.title}`}><Plus /></Button>
                                   <Button variant="ghost" size="icon-sm" onClick={() => { setSelectedTopic(topic); setDialog("topic"); }} aria-label={`Editar ${topic.title}`}><Pencil /></Button>
-                                  <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => setDeleteTarget({ type: "topic", id: topic.id, label: topic.title })} aria-label={`Excluir ${topic.title}`}><Trash2 /></Button>
+                                  <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => requestDelete({ type: "topic", id: topic.id, label: topic.title })} aria-label={`Excluir ${topic.title}`}><Trash2 /></Button>
                                 </div>
                               </div>
                             );
@@ -618,7 +698,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                     </article>
                   );
                 })}
-                {!disciplines.length && <EmptyState icon={<FileText />} title="Adicione um tópico" text="Crie as áreas principais do seu edital e organize seus subtópicos." action="Novo tópico" onAction={() => openDisciplineDialog()} />}
+                {!disciplines.length && <EmptyState icon={<FileText />} title="Adicione uma disciplina" text="Crie as disciplinas do seu edital e organize seus subtópicos." action="Nova disciplina" onAction={() => openDisciplineDialog()} />}
               </section>
             )}
           </TabsContent>
@@ -684,7 +764,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                             <TableCell>
                               <div className="flex justify-end gap-1">
                                 <Button variant="ghost" size="icon-sm" onClick={() => editSession(session)} aria-label="Editar registro de questões"><Pencil /></Button>
-                                <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => setDeleteTarget({ type: "session", id: session.id, label: `${session.questions} questões de ${formatDate(session.sessionDate)}` })} aria-label="Excluir registro de questões"><Trash2 /></Button>
+                                <Button variant="ghost" size="icon-sm" className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-500/10" onClick={() => requestDelete({ type: "session", id: session.id, label: `${session.questions} questões de ${formatDate(session.sessionDate)}` })} aria-label="Excluir registro de questões"><Trash2 /></Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -706,19 +786,40 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
       <TopicDialog open={dialog === "topic"} busy={busy} topic={selectedTopic} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => selectedTopic ? mutate(`/api/topics/${selectedTopic.id}`, body, "PATCH") : mutate("/api/topics", { disciplineId: selectedDisciplineId, ...body })} />
       <SessionDialog open={dialog === "session"} busy={busy} disciplines={disciplines} topics={topics} topic={selectedTopic} session={selectedSession} onOpenChange={(open) => !open && setDialog(null)} onSubmit={(body) => selectedSession ? mutate(`/api/sessions/${selectedSession.id}`, body, "PATCH") : mutate("/api/sessions", body)} />
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => {
+        if (!open) {
+          setDeleteTarget(null);
+          setDeleteConfirmation("");
+        }
+      }}>
         <AlertDialogContent className="rounded-[1.5rem]">
           <AlertDialogHeader>
-            <AlertDialogTitle>{deleteTarget?.type === "topic" ? "Excluir subtópico?" : "Excluir registro de questões?"}</AlertDialogTitle>
+            <AlertDialogTitle>{deleteTarget?.type === "discipline" ? "Excluir disciplina?" : deleteTarget?.type === "topic" ? "Excluir subtópico?" : "Excluir registro de questões?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.type === "topic"
+              {deleteTarget?.type === "discipline"
+                ? `A disciplina “${deleteTarget.label}” será apagada junto com todos os seus subtópicos e registros de questões. Essa ação não pode ser desfeita.`
+                : deleteTarget?.type === "topic"
                 ? `“${deleteTarget.label}” será removido. As sessões de questões já registradas serão preservadas, mas ficarão sem subtópico.`
                 : `“${deleteTarget?.label}” será removido permanentemente das métricas.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteTarget?.type === "discipline" && (
+            <div className="space-y-2">
+              <Label htmlFor="discipline-delete-confirmation">Digite <strong>123</strong> para confirmar</Label>
+              <Input
+                id="discipline-delete-confirmation"
+                inputMode="numeric"
+                autoComplete="off"
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                placeholder="123"
+                className="h-11 rounded-xl"
+              />
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void removeItem()}>{busy ? "Excluindo…" : "Excluir"}</AlertDialogAction>
+            <AlertDialogAction variant="destructive" disabled={busy || (deleteTarget?.type === "discipline" && deleteConfirmation !== "123")} onClick={() => void removeItem()}>{busy ? "Excluindo…" : "Excluir"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -839,10 +940,10 @@ function DisciplineDialog({ open, onOpenChange, onSubmit, busy, discipline }: { 
     onSubmit(String(new FormData(event.currentTarget).get("name") ?? ""));
   }
   return (
-    <DialogShell open={open} onOpenChange={onOpenChange} title={discipline ? "Editar tópico" : "Novo tópico"} description={discipline ? "Atualize o nome deste tópico principal." : "Crie uma área principal do edital para organizar seus subtópicos."} busy={busy}>
+    <DialogShell open={open} onOpenChange={onOpenChange} title={discipline ? "Editar disciplina" : "Nova disciplina"} description={discipline ? "Atualize o nome desta disciplina." : "Crie uma disciplina do edital para organizar seus subtópicos."} busy={busy}>
       <form key={discipline?.id ?? "new-discipline"} onSubmit={submit} className="space-y-4">
-        <Field label="Nome do tópico" name="name" defaultValue={discipline?.name ?? ""} placeholder="Ex.: Engenharia de Software" required />
-        <DialogFooter><Button type="submit" className="rounded-xl">{discipline ? "Salvar alterações" : "Adicionar tópico"}</Button></DialogFooter>
+        <Field label="Nome da disciplina" name="name" defaultValue={discipline?.name ?? ""} placeholder="Ex.: Engenharia de Software" required />
+        <DialogFooter><Button type="submit" className="rounded-xl">{discipline ? "Salvar alterações" : "Adicionar disciplina"}</Button></DialogFooter>
       </form>
     </DialogShell>
   );
@@ -924,9 +1025,9 @@ function examCountdown(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return "";
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const exam = new Date(year, month - 1, day);
-  const days = Math.round((exam.getTime() - today.getTime()) / 86_400_000);
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const examUtc = Date.UTC(year, month - 1, day);
+  const days = Math.round((examUtc - todayUtc) / 86_400_000);
   if (days < 0) return "Prova realizada";
   if (days === 0) return "É hoje";
   if (days === 1) return "Falta 1 dia";
