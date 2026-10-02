@@ -486,7 +486,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
         {data.contests.length > 0 && (
           <div className="mt-7 flex flex-wrap items-center gap-3 rounded-[1.35rem] border bg-card/95 p-2.5 shadow-[0_12px_35px_rgba(15,36,58,0.07)] backdrop-blur">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-50 text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300"><GraduationCap className="size-5" /></span>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-[12rem] flex-1">
               <p className="px-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Concurso ativo</p>
               <div className="mt-0.5 flex min-w-0 items-center gap-2">
                 <NativeSelect
@@ -504,10 +504,15 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
               </div>
             </div>
             {activeContest && (
-              <div className="flex w-full min-w-0 flex-col gap-2 text-sm sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex w-full min-w-0 flex-col gap-2 text-sm sm:flex-row sm:items-center">
                 <span className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 rounded-xl bg-muted/55 px-3 py-2 sm:max-w-72">
                   <span className="shrink-0 text-muted-foreground">Banca</span>
                   <strong className="min-w-0 break-words font-semibold leading-5 text-foreground">{activeContest.board}</strong>
+                </span>
+                <span className="flex items-center gap-2 rounded-xl bg-muted/55 px-3 py-2 text-muted-foreground">
+                  <Target className="size-4 shrink-0 text-cyan-600" />
+                  <span>Acertos</span>
+                  <strong className="whitespace-nowrap font-semibold text-foreground">{totalCorrect}/{totalQuestions}</strong>
                 </span>
                 {activeContest.examDate && (
                   <span className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/55 px-3 py-2 text-muted-foreground">
@@ -573,7 +578,7 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                                   <span className="h-9 w-1.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
                                   <div className="min-w-0">
                                     <p className="truncate font-semibold">{discipline.name}</p>
-                                    <p className="text-xs text-muted-foreground">{subjectQuestions ? `${subjectAccuracy}% de acertos · ${subjectQuestions} questões` : "Sem questões registradas"}</p>
+                                    <p className="text-xs text-muted-foreground">{subjectQuestions ? `${subjectCorrect}/${subjectQuestions} acertos · ${subjectAccuracy}%` : "0/0 acertos"}</p>
                                   </div>
                                 </div>
                                 <span className="flex items-center gap-1 text-sm font-semibold">{subjectProgress}% <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></span>
@@ -643,15 +648,21 @@ export function StudyDashboard({ displayName }: { displayName: string }) {
                 </div>
                 {disciplines.map((discipline, index) => {
                   const ownTopics = topics.filter((topic) => topic.disciplineId === discipline.id);
+                  const ownSessions = sessions.filter((session) => session.disciplineId === discipline.id);
                   const done = ownTopics.filter((topic) => Boolean(topic.completed)).length;
                   const percentage = ownTopics.length ? Math.round((done / ownTopics.length) * 100) : 0;
+                  const disciplineQuestions = ownSessions.reduce((sum, session) => sum + Number(session.questions), 0);
+                  const disciplineCorrect = ownSessions.reduce((sum, session) => sum + Number(session.correct), 0);
                   return (
                     <article key={discipline.id} className="overflow-hidden rounded-[1.5rem] border bg-card shadow-[0_14px_40px_rgba(15,36,58,0.07)]">
                       <header className="border-b bg-muted/45 p-5 sm:p-6">
                         <div className="flex min-w-0 items-start gap-3">
                           <span className="mt-0.5 h-10 w-1.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
                           <div className="min-w-0 flex-1">
-                            <h3 className="break-words font-semibold leading-6">{discipline.name}</h3>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <h3 className="break-words font-semibold leading-6">{discipline.name}</h3>
+                              <span className="whitespace-nowrap rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300">{disciplineCorrect}/{disciplineQuestions} acertos</span>
+                            </div>
                             <p className="text-sm text-muted-foreground">{done} de {ownTopics.length} subtópicos concluídos</p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
